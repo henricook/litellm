@@ -115,6 +115,12 @@ if MCP_AVAILABLE:
         if isinstance(logging_error, BaseException):
             verbose_logger.warning("MCP tool call logging failed (continuing): %s", logging_error)
 
+    class _RelayedUpstreamAuthHTTPException(HTTPException):
+        """An HTTPException produced by relaying a pass-through upstream 401/403, so logging can tell
+        the expected caller-must-reauth signal apart from a locally generated permission denial, which
+        must keep error-level visibility for monitoring (an authenticated user probing tool, server,
+        or IP restrictions should not get quieter logs)."""
+
     async def _execute_mcp_tool_or_relay_upstream_auth(request: Request, **kwargs: Any) -> Any:
         """Run execute_mcp_tool, converting a client-forwarded pass-through 401/403
         (MCPUpstreamAuthError) into an HTTPException that preserves any upstream WWW-Authenticate, so
@@ -124,18 +130,23 @@ if MCP_AVAILABLE:
         try:
             return await execute_mcp_tool(**kwargs)
         except MCPUpstreamAuthError as e:
-            # Logged once by the endpoint's except HTTPException handler (at info for 401/403), so the
-            # expected caller-must-reauth signal does not also produce an error-level line here.
-            raise e.to_http_exception(
+            # Logged once by the endpoint's except HTTPException handler (at info, keyed on the marker
+            # type), so the expected caller-must-reauth signal does not also produce an error-level line.
+            converted = e.to_http_exception(
                 base_url=get_request_base_url(request),
                 request_path=request.scope.get("_original_path") or request.url.path,
             )
+            raise _RelayedUpstreamAuthHTTPException(
+                status_code=converted.status_code,
+                detail=converted.detail,
+                headers=converted.headers,
+            )
 
     def _log_mcp_tool_call_http_exception(e: HTTPException) -> None:
-        # A 401/403 is an expected caller-must-reauth signal (the pass-through upstream relay, or a
-        # permission denial), not an operator-actionable error, so log it at info; anything else stays
-        # error level. Keeps error-rate alerts from firing on normal pass-through re-authentication.
-        if e.status_code in (401, 403):
+        # Only the relayed upstream 401/403 is an expected caller-must-reauth signal worth demoting to
+        # info; every locally generated HTTPException, including 401/403 permission and IP denials,
+        # stays at error level so restriction probing keeps full monitoring visibility.
+        if isinstance(e, _RelayedUpstreamAuthHTTPException):
             verbose_logger.info(f"MCP tool call returning HTTP {e.status_code}: {str(e.detail)}")
         else:
             verbose_logger.error(f"HTTPException in MCP tool call: {str(e)}")

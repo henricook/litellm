@@ -1741,6 +1741,30 @@ class TestCallToolRestAPI:
         info_messages = [str(c.args[0]) for c in mock_logger.info.call_args_list if c.args]
         assert sum(str(upstream_status) in m for m in info_messages) == 1
 
+    def test_local_permission_denial_keeps_error_level_logging(self, monkeypatch):
+        """Only the relayed upstream 401/403 may be demoted to info; a locally generated 403
+        (tool permission, server access, IP filtering) must stay at error level so an
+        authenticated user probing restrictions keeps full monitoring visibility."""
+        mock_logger = MagicMock()
+        monkeypatch.setattr(rest_endpoints, "verbose_logger", mock_logger, raising=False)
+
+        rest_endpoints._log_mcp_tool_call_http_exception(
+            HTTPException(status_code=403, detail="tool not allowed for key")
+        )
+        mock_logger.error.assert_called_once()
+        mock_logger.info.assert_not_called()
+
+        mock_logger.reset_mock()
+        rest_endpoints._log_mcp_tool_call_http_exception(
+            rest_endpoints._RelayedUpstreamAuthHTTPException(
+                status_code=401,
+                detail="upstream requires authentication",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        )
+        mock_logger.info.assert_called_once()
+        mock_logger.error.assert_not_called()
+
     async def test_success_logging_cancellation_propagates(self, monkeypatch):
         fire_logging = AsyncMock(side_effect=asyncio.CancelledError())
         monkeypatch.setattr(
