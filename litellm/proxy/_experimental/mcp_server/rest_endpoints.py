@@ -121,26 +121,36 @@ if MCP_AVAILABLE:
         must keep error-level visibility for monitoring (an authenticated user probing tool, server,
         or IP restrictions should not get quieter logs)."""
 
-    async def _execute_mcp_tool_or_relay_upstream_auth(request: Request, **kwargs: Any) -> Any:
-        """Run execute_mcp_tool, converting a client-forwarded pass-through 401/403
-        (MCPUpstreamAuthError) into an HTTPException that preserves any upstream WWW-Authenticate, so
-        a standards-compliant MCP client can run the upstream OAuth flow instead of the generic 500
-        the call endpoint's catch-all would otherwise return. The conversion lives here rather than
-        inline so the already-complex endpoint gains no branch."""
+    def _relayed_auth_http_exception(e: MCPUpstreamAuthError, request: Request) -> "_RelayedUpstreamAuthHTTPException":
+        """Convert a client-forwarded pass-through 401/403 into a marker HTTPException that preserves
+        the upstream WWW-Authenticate, so a standards-compliant MCP client can run the upstream OAuth
+        flow instead of the generic 500 the endpoint catch-all would return. Shared by the direct call
+        wrapper and the endpoint-level handler that covers the virtual mcp_tool_call branch."""
+        converted = e.to_http_exception(
+            base_url=get_request_base_url(request),
+            request_path=request.scope.get("_original_path") or request.url.path,
+        )
+        return _RelayedUpstreamAuthHTTPException(
+            status_code=converted.status_code,
+            detail=converted.detail,
+            headers=converted.headers,
+        )
+
+    async def _await_or_relay_upstream_auth(request: Request, coro: Awaitable[Any]) -> Any:
+        """Await an MCP tool-call coroutine, converting a client-forwarded pass-through 401/403
+        (MCPUpstreamAuthError) into the marker HTTPException (see _relayed_auth_http_exception) inside
+        the try body so the endpoint's existing except HTTPException handler logs it once at info and a
+        standards-compliant MCP client can run the upstream OAuth flow instead of the generic 500 the
+        catch-all would return. Wraps both the direct (execute_mcp_tool) and the virtual
+        (handle_mcp_tool_call) call sites so the relay is identical and the endpoint gains no branch."""
         try:
-            return await execute_mcp_tool(**kwargs)
+            return await coro
         except MCPUpstreamAuthError as e:
-            # Logged once by the endpoint's except HTTPException handler (at info, keyed on the marker
-            # type), so the expected caller-must-reauth signal does not also produce an error-level line.
-            converted = e.to_http_exception(
-                base_url=get_request_base_url(request),
-                request_path=request.scope.get("_original_path") or request.url.path,
-            )
-            raise _RelayedUpstreamAuthHTTPException(
-                status_code=converted.status_code,
-                detail=converted.detail,
-                headers=converted.headers,
-            )
+            raise _relayed_auth_http_exception(e, request)
+
+    async def _execute_mcp_tool_or_relay_upstream_auth(request: Request, **kwargs: Any) -> Any:
+        """Direct call-path wrapper around execute_mcp_tool; see _await_or_relay_upstream_auth."""
+        return await _await_or_relay_upstream_auth(request, execute_mcp_tool(**kwargs))
 
     def _log_mcp_tool_call_http_exception(e: HTTPException) -> None:
         # Only the relayed upstream 401/403 is an expected caller-must-reauth signal worth demoting to
@@ -908,16 +918,21 @@ if MCP_AVAILABLE:
                         general_settings=general_settings,
                     )
                     _tool_start_time = datetime.now()
-                    result = await handle_mcp_tool_call(
-                        tool_name=tool_arguments.get("tool_name", ""),
-                        arguments=tool_arguments.get("arguments") or {},
-                        user_api_key_dict=user_api_key_dict,
-                        client_ip=rest_client_ip,
-                        mcp_auth_header=virtual_mcp_auth_header,
-                        mcp_server_auth_headers=virtual_mcp_server_auth_headers,
-                        oauth2_headers=virtual_oauth2_headers,
-                        raw_headers=virtual_raw_headers,
-                        litellm_logging_obj=virtual_logging_obj,
+                    # Relay-wrapped like the direct branch so an upstream 401/403 becomes a real
+                    # 401/403 + WWW-Authenticate rather than the generic 500 the catch-all would raise.
+                    result = await _await_or_relay_upstream_auth(
+                        request,
+                        handle_mcp_tool_call(
+                            tool_name=tool_arguments.get("tool_name", ""),
+                            arguments=tool_arguments.get("arguments") or {},
+                            user_api_key_dict=user_api_key_dict,
+                            client_ip=rest_client_ip,
+                            mcp_auth_header=virtual_mcp_auth_header,
+                            mcp_server_auth_headers=virtual_mcp_server_auth_headers,
+                            oauth2_headers=virtual_oauth2_headers,
+                            raw_headers=virtual_raw_headers,
+                            litellm_logging_obj=virtual_logging_obj,
+                        ),
                     )
                     await _safe_fire_mcp_tool_call_logging(
                         virtual_logging_obj,
@@ -1059,7 +1074,9 @@ if MCP_AVAILABLE:
             )
         except HTTPException as e:
             # Re-raise as-is; log via the helper so the status-aware level choice (see below) does not
-            # add a branch to this already-complex endpoint.
+            # add a branch to this already-complex endpoint. Both call branches relay a pass-through
+            # 401/403 as _RelayedUpstreamAuthHTTPException (via _await_or_relay_upstream_auth), which is
+            # an HTTPException, so it is logged here at info like the direct branch.
             _log_mcp_tool_call_http_exception(e)
             raise e
         except Exception as e:

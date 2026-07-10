@@ -501,19 +501,29 @@ class MCPClient:
             raise
         except Exception as e:
             error_type = type(e).__name__
-            verbose_logger.exception(
+            # Mirror call_tool: when the caller opted into raise_on_error it owns the exception and
+            # logs it at the fitting level (an expected pass-through re-auth 401 is info, not an
+            # error), so log at debug here to avoid an error-level line + traceback that would trip
+            # error-rate alerts on that expected signal. The swallow path still logs the full
+            # exception because nothing downstream will surface the failure.
+            _msg = (
                 f"MCP client list_tools failed - "
                 f"Error Type: {error_type}, "
                 f"Error: {str(e)}, "
                 f"Server: {self.server_url or 'stdio'}, "
                 f"Transport: {self.transport_type}"
             )
+            if raise_on_error:
+                verbose_logger.debug(_msg)
+            else:
+                verbose_logger.exception(_msg)
             # Check if it's a stream/connection error
             if "BrokenResourceError" in error_type or "Broken" in error_type:
-                verbose_logger.error(
+                _broken = (
                     "MCP client detected broken connection/stream during list_tools - "
                     "the MCP server may have crashed, disconnected, or timed out"
                 )
+                verbose_logger.debug(_broken) if raise_on_error else verbose_logger.error(_broken)
 
             if raise_on_error:
                 raise

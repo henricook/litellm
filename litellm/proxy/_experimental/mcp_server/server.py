@@ -2959,6 +2959,12 @@ if MCP_AVAILABLE:
                 raw_headers=raw_headers,
                 **kwargs,
             )
+        except MCPUpstreamAuthError:
+            # A client-forwarded pass-through upstream 401/403 is an expected caller-must-reauth
+            # signal, not a failed call, so re-raise it without the post_call_failure_hook (which
+            # records a failure and can fire LLM exception alerts). mcp_server_tool_call downgrades it
+            # to an informational isError result for the streamable client.
+            raise
         except Exception as e:
             traceback_str = traceback.format_exc(limit=MAXIMUM_TRACEBACK_LINES_TO_LOG)
             from litellm.proxy.proxy_server import proxy_logging_obj

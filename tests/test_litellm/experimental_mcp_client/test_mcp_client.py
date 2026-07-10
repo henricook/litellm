@@ -628,3 +628,29 @@ async def test_call_tool_raise_on_error_logs_at_debug_not_error():
             result = await client.call_tool(params, raise_on_error=False)
             assert result.isError is True
             assert mock_log.error.called, "swallow path must keep error-level visibility"
+
+
+@pytest.mark.asyncio
+async def test_list_tools_raise_on_error_logs_at_debug_not_error():
+    """list_tools must mirror call_tool: when the caller opts into raise_on_error it owns the
+    exception, so an expected pass-through re-auth 401 does not emit an error/exception line that
+    would trip error-rate alerts. The swallow path still logs the full exception."""
+    client = MCPClient(transport_type=MCPTransport.stdio)
+    boom = RuntimeError("upstream boom")
+
+    async def _raise(_operation):
+        raise boom
+
+    with patch.object(client, "run_with_session", side_effect=_raise):
+        with patch.object(mcp_client_module, "verbose_logger") as mock_log:
+            with pytest.raises(RuntimeError):
+                await client.list_tools(raise_on_error=True)
+            assert not mock_log.error.called, "raise_on_error path must not log at error"
+            assert not mock_log.exception.called, "raise_on_error path must not log a traceback"
+            assert mock_log.debug.called
+
+    with patch.object(client, "run_with_session", side_effect=_raise):
+        with patch.object(mcp_client_module, "verbose_logger") as mock_log:
+            result = await client.list_tools(raise_on_error=False)
+            assert result == []
+            assert mock_log.exception.called, "swallow path must keep full exception visibility"

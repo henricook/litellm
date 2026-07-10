@@ -1782,6 +1782,60 @@ class TestCallToolRestAPI:
         fire_logging.assert_awaited_once()
 
 
+    async def test_virtual_mcp_tool_call_relays_upstream_auth_failure(self, monkeypatch):
+        """The virtual mcp_tool_call REST branch reaches execute_mcp_tool via handle_mcp_tool_call
+        without the direct branch's relay wrapper, so its upstream 401/403 must be relayed by the
+        endpoint-level handler (a real 401/403 + WWW-Authenticate) rather than falling through the
+        catch-all into a generic 500."""
+        import litellm.proxy._experimental.mcp_server.tool_search as tool_search_mod
+        from litellm.proxy._experimental.mcp_server.exceptions import MCPUpstreamAuthError
+        from litellm.proxy._types import LiteLLM_ObjectPermissionTable
+
+        challenge = 'Bearer resource_metadata="https://gw.example.com/.well-known/oauth-protected-resource"'
+
+        async def fake_contexts(user_api_key_auth):
+            return [user_api_key_auth]
+
+        async def fake_handle_mcp_tool_call(**kwargs):
+            raise MCPUpstreamAuthError(status_code=401, www_authenticate=challenge, server_name="stub")
+
+        class _FakePreCall:
+            def __init__(self, data):
+                pass
+
+            async def common_processing_pre_call_logic(self, **kwargs):
+                return None, MagicMock()
+
+        monkeypatch.setattr(rest_endpoints, "build_effective_auth_contexts", fake_contexts, raising=False)
+        monkeypatch.setattr(tool_search_mod, "handle_mcp_tool_call", fake_handle_mcp_tool_call, raising=False)
+        monkeypatch.setattr(
+            "litellm.proxy.common_request_processing.ProxyBaseLLMRequestProcessing",
+            _FakePreCall,
+            raising=False,
+        )
+        monkeypatch.setattr("litellm.proxy.proxy_server.proxy_config", {}, raising=False)
+        monkeypatch.setattr("litellm.proxy.proxy_server.general_settings", {}, raising=False)
+
+        user_api_key_dict = UserAPIKeyAuth(
+            object_permission=LiteLLM_ObjectPermissionTable(
+                object_permission_id="search-scope",
+                mcp_tool_search_enabled=True,
+            )
+        )
+        request = _build_request(
+            path="/mcp-rest/tools/call",
+            method="POST",
+            json_body={"name": "mcp_tool_call", "arguments": {"tool_name": "x", "arguments": {}}},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await rest_endpoints.call_tool_rest_api(request, user_api_key_dict=user_api_key_dict)
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.headers is not None
+        assert exc_info.value.headers.get("www-authenticate") == challenge
+
+
 class TestGetToolsForSingleServer:
     """Test _get_tools_for_single_server with object_permission filtering"""
 
