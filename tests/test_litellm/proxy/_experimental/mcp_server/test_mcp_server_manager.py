@@ -851,9 +851,16 @@ class TestMCPServerManager:
         mock_client.error_tool_result = MCPClient.error_tool_result
         manager._create_mcp_client = AsyncMock(return_value=mock_client)
 
-        result = await self._run_call_regular(manager, server)
+        from unittest.mock import patch as _patch
+        import litellm.proxy._experimental.mcp_server.mcp_server_manager as _mgr_mod
+
+        with _patch.object(_mgr_mod, "verbose_logger") as mock_log:
+            result = await self._run_call_regular(manager, server)
 
         assert result.isError is True
+        # A genuine non-auth failure keeps operator visibility at warning level, since call_tool's
+        # raise_on_error demoted the client-layer error log to debug.
+        assert mock_log.warning.called
 
     @pytest.mark.asyncio
     async def test_call_non_passthrough_does_not_opt_into_raise_on_error(self):

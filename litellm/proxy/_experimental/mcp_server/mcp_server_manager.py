@@ -3986,6 +3986,15 @@ class MCPServerManager:
                     except Exception as e:
                         auth_info = _extract_upstream_auth_failure(e)
                         if auth_info is None:
+                            # A genuine (non-auth) upstream/transport failure. raise_on_error demoted
+                            # the client-layer log to debug, so surface it here at warning level to
+                            # keep the outage visible; the caller still gets the graceful isError
+                            # result the default masking path would have produced.
+                            verbose_logger.warning(
+                                "Pass-through MCP tool call failed against %s (non-auth): %s",
+                                mcp_server.name or mcp_server.server_name or mcp_server.alias or "",
+                                e,
+                            )
                             return client.error_tool_result(e)
                         status_code, www_authenticate = auth_info
                         raise MCPUpstreamAuthError(

@@ -35,9 +35,7 @@ class TestMCPClient:
 
     def test_mcp_client_stdio_init(self):
         """Test MCPClient initialization with stdio config"""
-        stdio_config = MCPStdioConfig(
-            command="python", args=["-m", "my_mcp_server"], env={"DEBUG": "1"}
-        )
+        stdio_config = MCPStdioConfig(command="python", args=["-m", "my_mcp_server"], env={"DEBUG": "1"})
 
         client = MCPClient(transport_type=MCPTransport.stdio, stdio_config=stdio_config)
 
@@ -53,9 +51,7 @@ class TestMCPClient:
         # Test missing stdio_config
         client = MCPClient(transport_type=MCPTransport.stdio)
 
-        with pytest.raises(
-            ValueError, match="stdio_config is required for stdio transport"
-        ):
+        with pytest.raises(ValueError, match="stdio_config is required for stdio transport"):
 
             async def _noop(session):
                 return None
@@ -65,9 +61,7 @@ class TestMCPClient:
     @pytest.mark.asyncio
     @patch("litellm.experimental_mcp_client.client.stdio_client")
     @patch("litellm.experimental_mcp_client.client.ClientSession")
-    async def test_mcp_client_stdio_connect_success(
-        self, mock_session, mock_stdio_client
-    ):
+    async def test_mcp_client_stdio_connect_success(self, mock_session, mock_stdio_client):
         """Test successful stdio connection"""
         # Setup mocks - create proper async context manager
         mock_transport = (MagicMock(), MagicMock())
@@ -83,9 +77,7 @@ class TestMCPClient:
         mock_session_ctx.__aexit__.return_value = None
         mock_session.return_value = mock_session_ctx
 
-        stdio_config = MCPStdioConfig(
-            command="python", args=["-m", "my_mcp_server"], env={"DEBUG": "1"}
-        )
+        stdio_config = MCPStdioConfig(command="python", args=["-m", "my_mcp_server"], env={"DEBUG": "1"})
 
         client = MCPClient(transport_type=MCPTransport.stdio, stdio_config=stdio_config)
 
@@ -110,9 +102,7 @@ class TestMCPClient:
             "SSL_CERTIFICATE": "/path/to/client-cert.pem",
         },
     )
-    async def test_mcp_client_ssl_configuration_from_env(
-        self, mock_streamable_http_client
-    ):
+    async def test_mcp_client_ssl_configuration_from_env(self, mock_streamable_http_client):
         """Test that MCP client uses SSL configuration from environment variables"""
         # Setup mocks - create proper async context manager
         mock_transport = (MagicMock(), MagicMock())
@@ -122,9 +112,7 @@ class TestMCPClient:
         mock_streamable_http_client.return_value = mock_http_ctx
 
         # Mock the session
-        with patch(
-            "litellm.experimental_mcp_client.client.ClientSession"
-        ) as mock_session:
+        with patch("litellm.experimental_mcp_client.client.ClientSession") as mock_session:
             mock_session_instance = AsyncMock()
             mock_session_instance.initialize = AsyncMock()
             mock_session_ctx = AsyncMock()
@@ -170,9 +158,7 @@ class TestMCPClient:
         mock_sse_client.return_value = mock_sse_ctx
 
         # Mock the session
-        with patch(
-            "litellm.experimental_mcp_client.client.ClientSession"
-        ) as mock_session:
+        with patch("litellm.experimental_mcp_client.client.ClientSession") as mock_session:
             mock_session_instance = AsyncMock()
             mock_session_instance.initialize = AsyncMock()
             mock_session_ctx = AsyncMock()
@@ -224,9 +210,7 @@ class TestMCPClient:
         mock_streamable_http_client.return_value = mock_http_ctx
 
         # Mock the session
-        with patch(
-            "litellm.experimental_mcp_client.client.ClientSession"
-        ) as mock_session:
+        with patch("litellm.experimental_mcp_client.client.ClientSession") as mock_session:
             mock_session_instance = AsyncMock()
             mock_session_instance.initialize = AsyncMock()
             mock_session_ctx = AsyncMock()
@@ -451,14 +435,10 @@ class TestFirstNonCancelledCause:
         assert _first_non_cancelled_cause(outer) is target
 
     def test_all_cancelled_returns_none(self):
-        group = _FakeExceptionGroup(
-            "g", [asyncio.CancelledError(), asyncio.CancelledError()]
-        )
+        group = _FakeExceptionGroup("g", [asyncio.CancelledError(), asyncio.CancelledError()])
         assert _first_non_cancelled_cause(group) is None
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 11), reason="builtin ExceptionGroup requires 3.11+"
-    )
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="builtin ExceptionGroup requires 3.11+")
     def test_unwraps_builtin_exception_group(self):
         target = httpx.ConnectError("refused")
         group = ExceptionGroup("transport failed", [target])  # noqa: F821
@@ -497,9 +477,7 @@ class TestExecuteSessionOperationSurfacesTransportError:
             AsyncMock(side_effect=asyncio.CancelledError("cancelled by group")),
         )
         connect_error = httpx.ConnectError("All connection attempts failed")
-        transport_ctx = self._make_transport(
-            _FakeExceptionGroup("transport", [connect_error])
-        )
+        transport_ctx = self._make_transport(_FakeExceptionGroup("transport", [connect_error]))
 
         async def _op(session):
             return "done"
@@ -511,12 +489,8 @@ class TestExecuteSessionOperationSurfacesTransportError:
     @patch("litellm.experimental_mcp_client.client.ClientSession")
     async def test_genuine_cancellation_is_not_replaced(self, mock_session_cls):
         client = MCPClient(server_url="http://example.com/mcp", transport_type="http")
-        self._make_session(
-            mock_session_cls, AsyncMock(side_effect=asyncio.CancelledError())
-        )
-        transport_ctx = self._make_transport(
-            _FakeExceptionGroup("teardown", [asyncio.CancelledError()])
-        )
+        self._make_session(mock_session_cls, AsyncMock(side_effect=asyncio.CancelledError()))
+        transport_ctx = self._make_transport(_FakeExceptionGroup("teardown", [asyncio.CancelledError()]))
 
         async def _op(session):
             return "done"
@@ -531,9 +505,7 @@ class TestExecuteSessionOperationSurfacesTransportError:
         init_result = MagicMock()
         init_result.instructions = None
         self._make_session(mock_session_cls, AsyncMock(return_value=init_result))
-        transport_ctx = self._make_transport(
-            _FakeExceptionGroup("late", [httpx.ConnectError("late cleanup error")])
-        )
+        transport_ctx = self._make_transport(_FakeExceptionGroup("late", [httpx.ConnectError("late cleanup error")]))
 
         async def _op(session):
             return "done"
@@ -548,9 +520,7 @@ class TestMCPClientResolvedAuth:
     @pytest.mark.asyncio
     async def test_resolved_auth_feeds_the_auth_slot(self):
         resolved = httpx.Auth()
-        client = MCPClient(
-            server_url="https://upstream.example.com", resolved_auth=resolved
-        )
+        client = MCPClient(server_url="https://upstream.example.com", resolved_auth=resolved)
         http_client = client._create_httpx_client_factory()()
         try:
             assert http_client.auth is resolved
@@ -598,9 +568,7 @@ async def test_call_tool_does_not_log_arguments():
     secret = "ssn-123-45-6789"
     client = MCPClient(server_url="http://test-server")
     client.run_with_session = AsyncMock(return_value=MagicMock())
-    params = CallToolRequestParams(
-        name="search_tool", arguments={"input": secret, "model": "gpt-5-mini"}
-    )
+    params = CallToolRequestParams(name="search_tool", arguments={"input": secret, "model": "gpt-5-mini"})
 
     with patch.object(mcp_client_module, "verbose_logger") as mock_logger:
         await client.call_tool(params)
@@ -630,3 +598,33 @@ async def test_get_prompt_does_not_log_arguments():
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+@pytest.mark.asyncio
+async def test_call_tool_raise_on_error_logs_at_debug_not_error():
+    """When the caller opts into raise_on_error it owns the exception and logs it at the fitting
+    level (an expected pass-through re-auth 401 is info, not error). call_tool must therefore not emit
+    its own error-level line in that mode, so error-rate alerts do not trip on the expected signal;
+    the swallow path (raise_on_error=False) still logs at error since nothing downstream will."""
+    from mcp.types import CallToolRequestParams
+
+    client = MCPClient(transport_type=MCPTransport.stdio)
+    boom = RuntimeError("upstream boom")
+
+    async def _raise(_operation):
+        raise boom
+
+    params = CallToolRequestParams(name="t", arguments={})
+
+    with patch.object(client, "run_with_session", side_effect=_raise):
+        with patch.object(mcp_client_module, "verbose_logger") as mock_log:
+            with pytest.raises(RuntimeError):
+                await client.call_tool(params, raise_on_error=True)
+            assert not mock_log.error.called, "raise_on_error path must not log at error"
+            assert mock_log.debug.called
+
+    with patch.object(client, "run_with_session", side_effect=_raise):
+        with patch.object(mcp_client_module, "verbose_logger") as mock_log:
+            result = await client.call_tool(params, raise_on_error=False)
+            assert result.isError is True
+            assert mock_log.error.called, "swallow path must keep error-level visibility"

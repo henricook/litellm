@@ -580,7 +580,13 @@ class MCPClient:
             verbose_logger.debug(f"MCP client tool call traceback:\n{error_trace}")
             # Log detailed error information
             error_type = type(e).__name__
-            verbose_logger.error(
+            # When the caller opted into raise_on_error it owns the exception and logs it at the
+            # level that fits (an expected pass-through re-auth 401 is info, not an operator-actionable
+            # error), so log at debug here to avoid an error-level line that would trip error-rate
+            # alerts on that expected signal. The swallow path (raise_on_error=False) still logs at
+            # error because nothing downstream will surface the failure.
+            _log = verbose_logger.debug if raise_on_error else verbose_logger.error
+            _log(
                 f"MCP client call_tool failed - "
                 f"Error Type: {error_type}, "
                 f"Error: {str(e)}, "
@@ -590,7 +596,7 @@ class MCPClient:
             )
             # Check if it's a stream/connection error
             if "BrokenResourceError" in error_type or "Broken" in error_type:
-                verbose_logger.error(
+                _log(
                     "MCP client detected broken connection/stream - "
                     "the MCP server may have crashed, disconnected, or timed out."
                 )
